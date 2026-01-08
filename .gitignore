@@ -1,0 +1,14 @@
+# Python environment
+venv/
+__pycache__/
+*.pyc
+
+# Security
+.env
+
+# Large Data (Top 1% Rule: Never upload raw data to GitHub)
+data/raw/
+data/processed/
+
+# Models
+src/models/*.pkl
