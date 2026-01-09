@@ -7,104 +7,88 @@ import requests
 from io import BytesIO
 from dotenv import load_dotenv
 
-# 1. PATHING & ENVIRONMENT (Must come first for Cloud compatibility)
+# 1. PATHING
 load_dotenv()
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-# Import your shared UI and Analytics
 from src.ui_components import create_global_sidebar
-from src.analytics import CustomerAnalytics
 
-# 2. PAGE CONFIG
+# 2. LOCAL ANALYTICS CLASS (The Nuclear Option)
+# We define it here to bypass the broken 'src' cache on the cloud
+class CloudCustomerAnalytics:
+    def __init__(self, df):
+        self.df = df
+            
+    def generate_rfm(self):
+        if self.df.empty:
+            return pd.DataFrame()
+        df = self.df
+        snapshot_date = df['InvoiceDate'].max() + pd.Timedelta(days=1)
+        rfm = df.groupby('Customer ID').agg({
+            'InvoiceDate': lambda x: (snapshot_date - x.max()).days,
+            'Invoice': 'nunique',
+            'Line_Total': 'sum'
+        }).rename(columns={'InvoiceDate': 'Recency', 'Invoice': 'Frequency', 'Line_Total': 'Monetary'})
+        rfm = rfm[rfm.index.notnull()]
+        
+        # Scoring
+        rfm['R_Score'] = pd.qcut(rfm['Recency'], 5, labels=[5, 4, 3, 2, 1])
+        rfm['F_Score'] = pd.qcut(rfm['Frequency'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5])
+        rfm['M_Score'] = pd.qcut(rfm['Monetary'], 5, labels=[1, 2, 3, 4, 5])
+        rfm['RFM_Score'] = rfm['R_Score'].astype(str) + rfm['F_Score'].astype(str)
+        
+        segs = {
+            r'[1-2][1-2]': 'Hibernating', r'[1-2][3-4]': 'At Risk', r'[1-2]5': 'Can\'t Lose Them',
+            r'3[1-2]': 'About to Sleep', r'33': 'Need Attention', r'[3-4][4-5]': 'Loyalists',
+            r'41': 'Promising', r'51': 'New Customers', r'[4-5][2-3]': 'Potential Loyalists',
+            r'5[4-5]': 'Champions'
+        }
+        rfm['Segment'] = rfm['RFM_Score'].replace(segs, regex=True)
+        return rfm
+
+# 3. PAGE CONFIG
 st.set_page_config(page_title="Customer Intelligence", layout="wide")
 
-# 3. CLOUD-AWARE DATA ENGINE
+# 4. DATA LOADING
 @st.cache_data
 def load_cloud_data():
-    """
-    Handles data loading for both local and production environments.
-    """
-    local_path = os.getenv("PROCESSED_DATA_PATH")
-    if local_path and os.path.exists(local_path):
-        return pd.read_parquet(local_path)
-    
-    # CLOUD PRODUCTION: Raw Stream from Dropbox
     cloud_url = "https://www.dropbox.com/scl/fi/5daz0xt5dthm24hbyioxb/cleaned_data.parquet?rlkey=wvkn08glbo3ofur47l77fy978&st=9jbpru00&dl=1"
-    
     try:
         response = requests.get(cloud_url)
-        response.raise_for_status() 
         return pd.read_parquet(BytesIO(response.content))
-    except Exception as e:
-        st.error("⚠️ Customer Data Sync Failed.")
-        st.sidebar.error(f"Error: {e}")
+    except:
         return pd.DataFrame()
 
-# 4. INITIALIZE DATA & ANALYTICS
 raw_df = load_cloud_data()
 
 @st.cache_data
 def get_rfm_data(_df):
-    # THE SENIOR FIX: Passing explicitly as a keyword argument to match the new constructor
-    # This forces Streamlit to re-evaluate the class and clear the 'ghost' cache.
-    analyzer = CustomerAnalytics(input_df=_df) 
+    # USE THE LOCAL CLASS DEFINED ABOVE
+    analyzer = CloudCustomerAnalytics(_df) 
     return analyzer.generate_rfm()
 
 if not raw_df.empty:
-    with st.spinner("Analyzing 1M+ rows of customer behavior..."):
+    with st.spinner("Analyzing 1M+ rows..."):
         rfm_df = get_rfm_data(raw_df)
-
-    # 5. PERSISTENT SIDEBAR
-    date_range = create_global_sidebar(raw_df)
-
-    # 6. PAGE CONTENT
-    st.title("🎯 Customer Intelligence Lab")
-    st.markdown("---")
-
-    # --- 7. THE CIRCLE (Donut Intelligence) ---
-    st.subheader("Customer Segmentation Distribution")
-
-    # Image of the RFM segmentation model architecture
     
-
+    create_global_sidebar(raw_df)
+    st.title("🎯 Customer Intelligence Lab")
+    
+    # --- DONUT CHART ---
     segment_counts = rfm_df['Segment'].value_counts().reset_index()
     segment_counts.columns = ['Segment', 'Count']
-
-    fig = px.pie(
-        segment_counts, 
-        values='Count', 
-        names='Segment', 
-        hole=0.5, 
-        color_discrete_sequence=px.colors.diverging.RdYlGn[::-1], 
-        title="Market Share by Customer Segment"
-    )
-
-    fig.update_traces(textposition='inside', textinfo='percent+label')
-    fig.update_layout(
-        template="plotly_dark",
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(t=50, l=20, r=20, b=20)
-    )
-
+    fig = px.pie(segment_counts, values='Count', names='Segment', hole=0.5, 
+                 color_discrete_sequence=px.colors.diverging.RdYlGn[::-1])
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- 8. DEEP DIVE LOGIC ---
+    # --- TABLES ---
     st.divider()
-    col1, col2 = st.columns([1, 1])
-
-    with col1:
-        st.subheader("⚠️ High-Priority: At Risk")
-        at_risk = rfm_df[rfm_df['Segment'] == 'At Risk'].sort_values(by='Monetary', ascending=False)
-        st.dataframe(at_risk[['Recency', 'Frequency', 'Monetary']].head(10), use_container_width=True)
-        st.caption("Action: Send win-back discount codes immediately.")
-
-    with col2:
-        st.subheader("🏆 The Champions")
-        champions = rfm_df[rfm_df['Segment'] == 'Champions'].sort_values(by='Monetary', ascending=False)
-        st.dataframe(champions[['Recency', 'Frequency', 'Monetary']].head(10), use_container_width=True)
-        st.caption("Action: Enroll in VIP early-access program.")
-
-    st.success(f"📈 Strategy Insight: We have identified {len(champions)} Champions driving revenue.")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("⚠️ At Risk")
+        st.dataframe(rfm_df[rfm_df['Segment'] == 'At Risk'].head(10))
+    with c2:
+        st.subheader("🏆 Champions")
+        st.dataframe(rfm_df[rfm_df['Segment'] == 'Champions'].head(10))
 else:
-    st.warning("Please wait for data synchronization...")
+    st.warning("Data load failed.")
