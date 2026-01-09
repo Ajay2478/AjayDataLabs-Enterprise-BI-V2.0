@@ -47,13 +47,9 @@ def load_cloud_data():
 raw_df = load_cloud_data()
 
 @st.cache_data
-def get_rfm_data(_df): 
-    """
-    Generates RFM segments using the provided DataFrame.
-    The underscore tells Streamlit not to hash the massive DataFrame object.
-    """
-    # Uses the updated flexible class constructor
-    analyzer = CustomerAnalytics(df=_df) 
+def get_rfm_data(_df):
+    # Match the new 'input_df' parameter name
+    analyzer = CustomerAnalytics(input_df=_df) 
     return analyzer.generate_rfm()
 
 if not raw_df.empty:
