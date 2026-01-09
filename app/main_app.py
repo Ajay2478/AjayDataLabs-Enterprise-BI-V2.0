@@ -55,17 +55,16 @@ if not df.empty:
     st.title("🏛️ Executive Cockpit")
     st.markdown("---")
 
-    # KPI SECTION
+    # KPI SECTION: Real-time calculation
     total_rev = filtered_df['Line_Total'].sum()
     total_ord = filtered_df['Invoice'].nunique()
-    unique_cust = filtered_df['Customer ID'].nunique()
+    unique_cust = filtered_df['Customer ID'].nunique() # We defined it as unique_cust
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Revenue", f"${total_rev/1e6:.2f}M", delta="+5.2%")
     col2.metric("Total Orders", f"{total_ord:,}", delta="+12%")
-    col3.metric("Unique Customers", f"{unique_customers:,}", delta="-2.1%")
-
-    st.success("✨ Gold Layer Synced: Real-time Enterprise Metrics Active.")
+    # FIX: Change 'unique_customers' to 'unique_cust'
+    col3.metric("Unique Customers", f"{unique_cust:,}", delta="-2.1%")
 
     # 6. REVENUE VELOCITY
     st.subheader("📈 Revenue Growth Velocity")
