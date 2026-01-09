@@ -1,45 +1,41 @@
 import streamlit as st
 import pandas as pd
 import os
-import sys # Added for Path Management
+import sys
+import requests # Added for raw data streaming
+from io import BytesIO # Added for memory-efficient loading
 import plotly.express as px
 from dotenv import load_dotenv
 
 # --- 1. THE CLOUD PATH FIX ---
-# This ensures 'src' is discoverable regardless of where the app is launched from
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-# Now we can safely import your shared components
 from src.ui_components import create_global_sidebar
 
 # 2. INITIALIZATION
 load_dotenv()
 
-st.set_page_config(
-    page_title="AjayDataLabs BI Suite",
-    page_icon="💎",
-    layout="wide"
-)
+st.set_page_config(page_title="AjayDataLabs BI Suite", page_icon="💎", layout="wide")
 
-# 3. DATA ENGINE
+# 3. DATA ENGINE (The "Beyond" Cloud Strategy)
 @st.cache_data
 def load_gold_layer():
-    # 1. Local Development (Your PC)
+    # Attempt to load from Local Path first (for your PC development)
     local_path = os.getenv("PROCESSED_DATA_PATH")
     if local_path and os.path.exists(local_path):
         return pd.read_parquet(local_path)
     
-    # 2. Cloud Production (Direct Stream from Google Drive)
-    # Your Drive ID: 1ZL4I0iSDU0tDWt6zDEp7ycEWq4MLytZ8
-    file_id = "1ZL4I0iSDU0tDWt6zDEp7ycEWq4MLytZ8"
-    cloud_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    # CLOUD PRODUCTION: Raw Stream from Dropbox
+    # Your verified link
+    cloud_url = "https://www.dropbox.com/scl/fi/5daz0xt5dthm24hbyioxb/cleaned_data.parquet?rlkey=wvkn08glbo3ofur47l77fy978&st=9jbpru00&dl=1"
     
     try:
-        # High-speed stream into the Gold Layer
-        return pd.read_parquet(cloud_url)
+        # Stream the parquet file directly into memory
+        response = requests.get(cloud_url)
+        response.raise_for_status() # Ensure the connection is healthy
+        return pd.read_parquet(BytesIO(response.content))
     except Exception as e:
-        st.error(f"⚠️ Cloud Sync Failed. Ensure the Drive link is 'Anyone with link can view'.")
-        st.sidebar.warning(f"Technical Log: {e}")
+        st.error("⚠️ Enterprise Data Sync Failed. Check cloud connectivity.")
+        st.sidebar.error(f"Technical Log: {e}")
         return pd.DataFrame()
 
 df = load_gold_layer()
