@@ -7,33 +7,26 @@ load_dotenv()
 
 class CustomerAnalytics:
     def __init__(self, df=None):
-        # The Senior Fix: If a df is passed (Cloud), use it. 
-        # Otherwise, look for the local path (Development).
-        if df is not None:
+        # The Senior Fix: Explicitly check if the object is a DataFrame
+        if isinstance(df, pd.DataFrame):
             self.df = df
         else:
+            # Fallback for local dev/testing
             path = os.getenv("PROCESSED_DATA_PATH")
             if path and os.path.exists(path):
                 self.df = pd.read_parquet(path)
             else:
-                # Fail-safe for local runs without .env
-                self.df = pd.DataFrame() 
+                self.df = pd.DataFrame() # Avoid NoneType errors
             
     def generate_rfm(self):
         if self.df.empty:
-            print("⚠️ No data available for analysis.")
             return pd.DataFrame()
 
-        print("📊 Analyzing Customer Behavior (RFM)...")
-        
-        # USE THE INTERNAL DATA (The Fix)
-        # We no longer read from self.input_path here
+        # USE THE INTERNAL STATE
         df = self.df
         
-        # 1. Reference date for Recency
         snapshot_date = df['InvoiceDate'].max() + pd.Timedelta(days=1)
         
-        # 2. Aggregate Data per Customer
         rfm = df.groupby('Customer ID').agg({
             'InvoiceDate': lambda x: (snapshot_date - x.max()).days,
             'Invoice': 'nunique',
@@ -44,15 +37,13 @@ class CustomerAnalytics:
             'Line_Total': 'Monetary'
         })
 
-        # 3. Handle Null IDs
         rfm = rfm[rfm.index.notnull()]
 
-        # 4. Scoring (1 to 5)
+        # Standard Scoring
         rfm['R_Score'] = pd.qcut(rfm['Recency'], 5, labels=[5, 4, 3, 2, 1])
         rfm['F_Score'] = pd.qcut(rfm['Frequency'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5])
         rfm['M_Score'] = pd.qcut(rfm['Monetary'], 5, labels=[1, 2, 3, 4, 5])
 
-        # 5. Segment Labeling
         rfm['RFM_Score'] = rfm['R_Score'].astype(str) + rfm['F_Score'].astype(str)
         
         segs = {
@@ -68,8 +59,6 @@ class CustomerAnalytics:
             r'5[4-5]': 'Champions'
         }
         rfm['Segment'] = rfm['RFM_Score'].replace(segs, regex=True)
-        
-        print(f"✅ Segmented {len(rfm)} Unique Customers.")
         return rfm
 
 if __name__ == "__main__":
