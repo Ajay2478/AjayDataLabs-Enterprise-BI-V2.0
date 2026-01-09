@@ -5,104 +5,103 @@ import plotly.graph_objects as go
 import joblib
 import os
 import sys
+import requests
+from io import BytesIO
 from dotenv import load_dotenv
 
-# 1. PATHING & ENVIRONMENT (Critical for finding 'src')
+# 1. PATHING & ENVIRONMENT (Critical for Cloud compatibility)
 load_dotenv()
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../'))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-# Now we can safely import your shared components
+# Import your shared components
 from src.ui_components import create_global_sidebar
 
 # 2. PAGE CONFIG
 st.set_page_config(page_title="Predictor Lab", layout="wide")
 
-# 3. ADVANCED FEATURE ENGINEERING (The 'Beyond' Logic)
+# 3. CLOUD-AWARE DATA ENGINE
 @st.cache_data
-def get_engineered_data():
-    path = os.getenv("PROCESSED_DATA_PATH")
-    if not path or not os.path.exists(path):
+def load_production_data():
+    """
+    Handles million-row data streaming for the prediction engine.
+    """
+    local_path = os.getenv("PROCESSED_DATA_PATH")
+    if local_path and os.path.exists(local_path):
+        return pd.read_parquet(local_path)
+    
+    # Cloud Stream from your verified Dropbox link
+    cloud_url = "https://www.dropbox.com/scl/fi/5daz0xt5dthm24hbyioxb/cleaned_data.parquet?rlkey=wvkn08glbo3ofur47l77fy978&st=9jbpru00&dl=1"
+    
+    try:
+        response = requests.get(cloud_url)
+        response.raise_for_status()
+        return pd.read_parquet(BytesIO(response.content))
+    except Exception as e:
+        st.error(f"⚠️ Prediction Engine Data Sync Failed: {e}")
         return pd.DataFrame()
 
-    df_raw = pd.read_parquet(path)
-    
+# 4. ADVANCED FEATURE ENGINEERING
+@st.cache_data
+def get_engineered_data(_df_raw):
+    """
+    Transforms raw data into time-series features for XGBoost.
+    """
+    if _df_raw.empty:
+        return pd.DataFrame()
+
     # Monthly Resampling
-    monthly = df_raw.set_index('InvoiceDate')['Line_Total'].resample('MS').sum().reset_index()
+    monthly = _df_raw.set_index('InvoiceDate')['Line_Total'].resample('MS').sum().reset_index()
     
-    # Feature Engineering (Must match training exactly)
+    # Feature Engineering (Must match training features exactly)
     monthly['Month_Ordinal'] = np.arange(len(monthly))
     monthly['Lag_1'] = monthly['Line_Total'].shift(1)
     monthly['Lag_2'] = monthly['Line_Total'].shift(2)
     monthly['Rolling_Mean'] = monthly['Line_Total'].shift(1).rolling(window=3).mean()
     
-    return monthly.dropna(), df_raw
+    return monthly.dropna()
 
-# 4. LOAD DATA & PERSISTENT SIDEBAR
-# We need monthly_df for the chart and raw_df for the sidebar filters
-monthly_df, raw_df = get_engineered_data()
+# 5. INITIALIZE DATA
+raw_df = load_production_data()
+monthly_df = get_engineered_data(raw_df)
 
-# Restoration of the persistent V1 Sidebar
-date_range = create_global_sidebar(raw_df)
+if not raw_df.empty:
+    # Persistent Sidebar Restoration
+    date_range = create_global_sidebar(raw_df)
 
-# 5. PAGE CONTENT
-st.title("🔮 Predictive Revenue Lab (XGBoost Edition)")
-st.markdown("---")
+    # 6. PAGE CONTENT
+    st.title("🔮 Predictive Revenue Lab (XGBoost Edition)")
+    st.markdown("---")
 
-model_path = "src/models/revenue_model.pkl"
+    # Cloud-Path for Model (Ensures it works locally and on cloud)
+    model_path = os.path.join(os.path.dirname(__file__), "../../src/models/revenue_model.pkl")
 
-if not monthly_df.empty and os.path.exists(model_path):
-    # 6. Load the trained XGBoost Brain
-    model = joblib.load(model_path)
-    
-    # 7. Sidebar - Strategy Simulator
-    st.sidebar.markdown("---")
-    st.sidebar.header("🕹️ Strategy Simulator")
-    st.sidebar.info("Simulate revenue growth based on marketing lift.")
-    lift = st.sidebar.slider("Simulated Marketing Lift (%)", 0, 50, 0) / 100
+    if not monthly_df.empty and os.path.exists(model_path):
+        # 7. Load the trained XGBoost Brain
+        model = joblib.load(model_path)
+        
+        # 8. Sidebar - Strategy Simulator
+        st.sidebar.markdown("---")
+        st.sidebar.header("🕹️ Strategy Simulator")
+        lift = st.sidebar.slider("Simulated Marketing Lift (%)", 0, 50, 0) / 100
 
-    # 8. Generate Predictions
-    features = ['Month_Ordinal', 'Lag_1', 'Lag_2', 'Rolling_Mean']
-    current_preds = model.predict(monthly_df[features])
-    
-    # Apply lift for simulation
-    simulated_preds = current_preds * (1 + lift)
+        # 9. Generate Predictions
+        features = ['Month_Ordinal', 'Lag_1', 'Lag_2', 'Rolling_Mean']
+        current_preds = model.predict(monthly_df[features])
+        simulated_preds = current_preds * (1 + lift)
 
-    # 9. Visualization
-    fig = go.Figure()
+        # 10. Visualization
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=monthly_df['InvoiceDate'], y=monthly_df['Line_Total'], name="Actual Revenue", line=dict(color='royalblue', width=3)))
+        fig.add_trace(go.Scatter(x=monthly_df['InvoiceDate'], y=current_preds, name="Model Baseline", line=dict(color='white', dash='dot', width=1)))
+        fig.add_trace(go.Scatter(x=monthly_df['InvoiceDate'], y=simulated_preds, name="Simulated Strategy", line=dict(color='#00FFCC', width=4)))
 
-    # Actual Revenue Data
-    fig.add_trace(go.Scatter(
-        x=monthly_df['InvoiceDate'], y=monthly_df['Line_Total'], 
-        name="Actual Revenue", line=dict(color='royalblue', width=3)
-    ))
-
-    # XGBoost Baseline
-    fig.add_trace(go.Scatter(
-        x=monthly_df['InvoiceDate'], y=current_preds, 
-        name="Model Baseline", line=dict(color='white', dash='dot', width=1)
-    ))
-
-    # Simulated Strategy Line
-    fig.add_trace(go.Scatter(
-        x=monthly_df['InvoiceDate'], y=simulated_preds, 
-        name="Simulated Strategy", line=dict(color='#00FFCC', width=4)
-    ))
-
-    fig.update_layout(
-        title="Revenue Velocity: Strategic Impact Simulation",
-        xaxis_title="Timeline", yaxis_title="Revenue ($)",
-        template="plotly_dark", hovermode="x unified"
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # 10. Senior Metrics
-    st.divider()
-    c1, c2 = st.columns(2)
-    with c1:
-        st.metric("Model Baseline (Last Month)", f"${current_preds[-1]/1e3:.1f}k")
-    with c2:
-        st.metric("Simulated Target", f"${simulated_preds[-1]/1e3:.1f}k", delta=f"{lift*100:.0f}% Lift")
-
-else:
-    st.warning("⚠️ Prerequisites missing. Ensure you have run data_loader.py and predictor.py.")
+        fig.update_layout(title="Revenue Velocity Simulation", template="plotly_dark", hovermode="x unified")
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # 11. Metrics
+        st.divider()
+        c1, c2 = st.columns(2)
+        c1.metric("Baseline Forecast", f"${current_preds[-1]/1e3:.1f}k")
+        c2.metric("Target with Lift", f"${simulated_preds[-1]/1e3:.1f}k", delta=f"{lift*100:.0f}%")
+    else:
+        st.warning("⚠️ ML Model not found in src/models/. Ensure revenue_model.pkl is uploaded.")
