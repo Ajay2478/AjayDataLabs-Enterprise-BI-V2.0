@@ -24,24 +24,23 @@ st.set_page_config(
 # 3. DATA ENGINE
 @st.cache_data
 def load_gold_layer():
-    # Attempt to load from .env path (Local)
+    # 1. Local Development (Your PC)
     local_path = os.getenv("PROCESSED_DATA_PATH")
-    
-    # Check if file exists locally
     if local_path and os.path.exists(local_path):
         return pd.read_parquet(local_path)
     
-    # Check common relative path (Cloud/GitHub)
-    relative_path = os.path.join(os.path.dirname(__file__), "../data/processed/gold_layer.parquet")
-    if os.path.exists(relative_path):
-        return pd.read_parquet(relative_path)
+    # 2. Cloud Production (Direct Stream from Google Drive)
+    # Your Drive ID: 1ZL4I0iSDU0tDWt6zDEp7ycEWq4MLytZ8
+    file_id = "1ZL4I0iSDU0tDWt6zDEp7ycEWq4MLytZ8"
+    cloud_url = f"https://drive.google.com/uc?export=download&id={file_id}"
     
-    # FALLBACK: If on Cloud and files are too big for Git, use your public link here
-    # cloud_url = "YOUR_PUBLIC_DOWNLOAD_LINK"
-    # return pd.read_parquet(cloud_url)
-    
-    st.error("⚠️ Data source not found. Please verify PROCESSED_DATA_PATH.")
-    return pd.DataFrame()
+    try:
+        # High-speed stream into the Gold Layer
+        return pd.read_parquet(cloud_url)
+    except Exception as e:
+        st.error(f"⚠️ Cloud Sync Failed. Ensure the Drive link is 'Anyone with link can view'.")
+        st.sidebar.warning(f"Technical Log: {e}")
+        return pd.DataFrame()
 
 df = load_gold_layer()
 
