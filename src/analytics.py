@@ -7,21 +7,30 @@ load_dotenv()
 
 class CustomerAnalytics:
     def __init__(self, df=None):
-        # The Senior Fix: If a df is passed, use it. Otherwise, look for the local path.
+        # The Senior Fix: If a df is passed (Cloud), use it. 
+        # Otherwise, look for the local path (Development).
         if df is not None:
             self.df = df
         else:
-            import os
             path = os.getenv("PROCESSED_DATA_PATH")
-            import pandas as pd
-            self.df = pd.read_parquet(path)
+            if path and os.path.exists(path):
+                self.df = pd.read_parquet(path)
+            else:
+                # Fail-safe for local runs without .env
+                self.df = pd.DataFrame() 
             
-        
     def generate_rfm(self):
+        if self.df.empty:
+            print("⚠️ No data available for analysis.")
+            return pd.DataFrame()
+
         print("📊 Analyzing Customer Behavior (RFM)...")
-        df = pd.read_parquet(self.input_path)
         
-        # 1. Reference date for Recency (Day after last transaction in dataset)
+        # USE THE INTERNAL DATA (The Fix)
+        # We no longer read from self.input_path here
+        df = self.df
+        
+        # 1. Reference date for Recency
         snapshot_date = df['InvoiceDate'].max() + pd.Timedelta(days=1)
         
         # 2. Aggregate Data per Customer
@@ -35,11 +44,10 @@ class CustomerAnalytics:
             'Line_Total': 'Monetary'
         })
 
-        # 3. Handle Null IDs (The "Pro" Choice: Drop them for segmentation)
+        # 3. Handle Null IDs
         rfm = rfm[rfm.index.notnull()]
 
         # 4. Scoring (1 to 5)
-        # Recency: Lower is better (5), Frequency/Monetary: Higher is better (5)
         rfm['R_Score'] = pd.qcut(rfm['Recency'], 5, labels=[5, 4, 3, 2, 1])
         rfm['F_Score'] = pd.qcut(rfm['Frequency'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5])
         rfm['M_Score'] = pd.qcut(rfm['Monetary'], 5, labels=[1, 2, 3, 4, 5])
@@ -47,7 +55,6 @@ class CustomerAnalytics:
         # 5. Segment Labeling
         rfm['RFM_Score'] = rfm['R_Score'].astype(str) + rfm['F_Score'].astype(str)
         
-        # Top 1% Logic: Define Segments
         segs = {
             r'[1-2][1-2]': 'Hibernating',
             r'[1-2][3-4]': 'At Risk',
@@ -66,6 +73,8 @@ class CustomerAnalytics:
         return rfm
 
 if __name__ == "__main__":
+    # Test block for local development
     analyzer = CustomerAnalytics()
-    rfm_results = analyzer.generate_rfm()
-    print(rfm_results['Segment'].value_counts())
+    if not analyzer.df.empty:
+        rfm_results = analyzer.generate_rfm()
+        print(rfm_results['Segment'].value_counts())
