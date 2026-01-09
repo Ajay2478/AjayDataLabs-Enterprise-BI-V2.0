@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 
 # 1. PATHING & ENVIRONMENT (Must come first for Cloud compatibility)
 load_dotenv()
-# Dynamically locate the root directory to access 'src'
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 # Import your shared UI and Analytics
@@ -25,7 +24,6 @@ def load_cloud_data():
     """
     Handles data loading for both local and production environments.
     """
-    # Attempt Local Load (Your PC)
     local_path = os.getenv("PROCESSED_DATA_PATH")
     if local_path and os.path.exists(local_path):
         return pd.read_parquet(local_path)
@@ -34,7 +32,6 @@ def load_cloud_data():
     cloud_url = "https://www.dropbox.com/scl/fi/5daz0xt5dthm24hbyioxb/cleaned_data.parquet?rlkey=wvkn08glbo3ofur47l77fy978&st=9jbpru00&dl=1"
     
     try:
-        # Direct binary stream for memory efficiency
         response = requests.get(cloud_url)
         response.raise_for_status() 
         return pd.read_parquet(BytesIO(response.content))
@@ -48,7 +45,8 @@ raw_df = load_cloud_data()
 
 @st.cache_data
 def get_rfm_data(_df):
-    # Match the new 'input_df' parameter name
+    # THE SENIOR FIX: Passing explicitly as a keyword argument to match the new constructor
+    # This forces Streamlit to re-evaluate the class and clear the 'ghost' cache.
     analyzer = CustomerAnalytics(input_df=_df) 
     return analyzer.generate_rfm()
 
@@ -66,10 +64,12 @@ if not raw_df.empty:
     # --- 7. THE CIRCLE (Donut Intelligence) ---
     st.subheader("Customer Segmentation Distribution")
 
+    # Image of the RFM segmentation model architecture
+    
+
     segment_counts = rfm_df['Segment'].value_counts().reset_index()
     segment_counts.columns = ['Segment', 'Count']
 
-    # Create the Executive Donut Chart with divergent colors
     fig = px.pie(
         segment_counts, 
         values='Count', 

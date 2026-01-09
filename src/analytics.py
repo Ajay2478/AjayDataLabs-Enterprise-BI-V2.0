@@ -6,26 +6,30 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class CustomerAnalytics:
-    # Change 'df' to 'input_df' to force a cache reset
-    def __init__(self, input_df=None):
+    def __init__(self, input_df=None, **kwargs):
+        # The 'Super-Flexible' Constructor
+        # This handles 'input_df', 'df', or positional arguments
         if isinstance(input_df, pd.DataFrame):
             self.df = input_df
+        elif 'df' in kwargs and isinstance(kwargs['df'], pd.DataFrame):
+            self.df = kwargs['df']
         else:
-            # Fallback for local testing
+            # Fallback for local
             path = os.getenv("PROCESSED_DATA_PATH")
             if path and os.path.exists(path):
                 self.df = pd.read_parquet(path)
             else:
                 self.df = pd.DataFrame()
-            
+        
+        print(f"DEBUG: CustomerAnalytics initialized with {len(self.df)} rows.")
+
     def generate_rfm(self):
         if self.df.empty:
             return pd.DataFrame()
 
-        df = self.df # Ensure we use the assigned dataframe
+        df = self.df
         snapshot_date = df['InvoiceDate'].max() + pd.Timedelta(days=1)
         
-        # Aggregation logic
         rfm = df.groupby('Customer ID').agg({
             'InvoiceDate': lambda x: (snapshot_date - x.max()).days,
             'Invoice': 'nunique',
@@ -34,10 +38,18 @@ class CustomerAnalytics:
 
         rfm = rfm[rfm.index.notnull()]
         
-        # Scoring and Segmentation
-        rfm['R_Score'] = pd.qcut(rfm['Recency'], 5, labels=[5, 4, 3, 2, 1])
-        rfm['F_Score'] = pd.qcut(rfm['Frequency'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5])
-        rfm['M_Score'] = pd.qcut(rfm['Monetary'], 5, labels=[1, 2, 3, 4, 5])
+        # Define bins safely
+        for col in ['Recency', 'Frequency', 'Monetary']:
+            if rfm[col].nunique() < 5: # Handle edge cases with small data
+                rfm[col + '_Score'] = 1
+            else:
+                if col == 'Recency':
+                    rfm['R_Score'] = pd.qcut(rfm['Recency'], 5, labels=[5, 4, 3, 2, 1])
+                elif col == 'Frequency':
+                    rfm['F_Score'] = pd.qcut(rfm['Frequency'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5])
+                else:
+                    rfm['M_Score'] = pd.qcut(rfm['Monetary'], 5, labels=[1, 2, 3, 4, 5])
+
         rfm['RFM_Score'] = rfm['R_Score'].astype(str) + rfm['F_Score'].astype(str)
         
         segs = {
@@ -48,7 +60,7 @@ class CustomerAnalytics:
         }
         rfm['Segment'] = rfm['RFM_Score'].replace(segs, regex=True)
         return rfm
-
+    
 if __name__ == "__main__":
     # Test block for local development
     analyzer = CustomerAnalytics()
