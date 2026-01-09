@@ -7,8 +7,9 @@ import requests
 from io import BytesIO
 from dotenv import load_dotenv
 
-# 1. PATHING & ENVIRONMENT (Must come first)
+# 1. PATHING & ENVIRONMENT (Must come first for Cloud compatibility)
 load_dotenv()
+# Dynamically locate the root directory to access 'src'
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 # Import your shared UI and Analytics
@@ -21,6 +22,9 @@ st.set_page_config(page_title="Customer Intelligence", layout="wide")
 # 3. CLOUD-AWARE DATA ENGINE
 @st.cache_data
 def load_cloud_data():
+    """
+    Handles data loading for both local and production environments.
+    """
     # Attempt Local Load (Your PC)
     local_path = os.getenv("PROCESSED_DATA_PATH")
     if local_path and os.path.exists(local_path):
@@ -30,19 +34,25 @@ def load_cloud_data():
     cloud_url = "https://www.dropbox.com/scl/fi/5daz0xt5dthm24hbyioxb/cleaned_data.parquet?rlkey=wvkn08glbo3ofur47l77fy978&st=9jbpru00&dl=1"
     
     try:
+        # Direct binary stream for memory efficiency
         response = requests.get(cloud_url)
         response.raise_for_status() 
         return pd.read_parquet(BytesIO(response.content))
     except Exception as e:
         st.error("⚠️ Customer Data Sync Failed.")
+        st.sidebar.error(f"Error: {e}")
         return pd.DataFrame()
 
 # 4. INITIALIZE DATA & ANALYTICS
 raw_df = load_cloud_data()
 
 @st.cache_data
-def get_rfm_data(_df): # The underscore tells Streamlit not to hash the DF
-    # Now that we updated the class, this will work perfectly
+def get_rfm_data(_df): 
+    """
+    Generates RFM segments using the provided DataFrame.
+    The underscore tells Streamlit not to hash the massive DataFrame object.
+    """
+    # Uses the updated flexible class constructor
     analyzer = CustomerAnalytics(df=_df) 
     return analyzer.generate_rfm()
 
@@ -63,6 +73,7 @@ if not raw_df.empty:
     segment_counts = rfm_df['Segment'].value_counts().reset_index()
     segment_counts.columns = ['Segment', 'Count']
 
+    # Create the Executive Donut Chart with divergent colors
     fig = px.pie(
         segment_counts, 
         values='Count', 
