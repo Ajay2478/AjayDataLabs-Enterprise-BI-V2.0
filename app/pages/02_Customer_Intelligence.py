@@ -41,8 +41,8 @@ def load_cloud_data():
 raw_df = load_cloud_data()
 
 @st.cache_data
-def get_rfm_data(_df):
-    # We pass the cloud-loaded dataframe to your analytics engine
+def get_rfm_data(_df): # The underscore tells Streamlit not to hash the DF
+    # Now that we updated the class, this will work perfectly
     analyzer = CustomerAnalytics(df=_df) 
     return analyzer.generate_rfm()
 

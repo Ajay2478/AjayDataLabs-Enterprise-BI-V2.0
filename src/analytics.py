@@ -6,9 +6,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class CustomerAnalytics:
-    def __init__(self):
-        self.input_path = os.getenv("PROCESSED_DATA_PATH")
-
+    def __init__(self, df=None):
+        # The Senior Fix: If a df is passed, use it. Otherwise, look for the local path.
+        if df is not None:
+            self.df = df
+        else:
+            import os
+            path = os.getenv("PROCESSED_DATA_PATH")
+            import pandas as pd
+            self.df = pd.read_parquet(path)
+            
+        
     def generate_rfm(self):
         print("📊 Analyzing Customer Behavior (RFM)...")
         df = pd.read_parquet(self.input_path)
